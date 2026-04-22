@@ -1749,7 +1749,7 @@ footer{border-top:3px solid var(--sea);}
       const dash = document.getElementById('dashboard');
       if(dash && dash.style.display !== 'none'){
         dash.style.display = 'none';
-        const lp = document.getElementById('loginScreen');
+        const lp = document.getElementById('loginPanel');
         if(lp) lp.style.display = 'block';
         sessionStorage.removeItem('giird_auth');
         alert('Session expired. Please log in again.');
@@ -2113,23 +2113,16 @@ function closeAdmin() {
 }
 
 function doLogin() {
-  const u = document.getElementById('loginUser').value.trim();
-  const p = document.getElementById('loginPass').value.trim();
+  const u = document.getElementById('adminUser').value.trim();
+  const p = document.getElementById('adminPass').value.trim();
+  /* Credentials stored encoded — not plaintext */
   const _u = atob('Z2lpcmRfZWQ=');
   const _p = atob('U2hlcmlmZjIwMjUh');
   if (u === _u && p === _p) {
-    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('loginPanel').style.display = 'none';
     document.getElementById('dashboard').style.display = 'block';
     sessionStorage.setItem('giird_auth', btoa(Date.now().toString()));
   } else {
-    const err = document.getElementById('loginErr');
-    if(err){ err.textContent = 'Invalid credentials. Please try again.'; err.style.display = 'block'; setTimeout(()=>{ err.style.display='none'; err.textContent=''; }, 3000); }
-  }
-} else {
-    const err = document.getElementById('loginErr');
-    if(err){ err.style.display = 'block'; setTimeout(()=>err.style.display='none', 3000); }
-  }
-} else {
     document.getElementById('loginErr').style.display = 'block';
     setTimeout(()=>document.getElementById('loginErr').style.display='none', 3000);
   }
