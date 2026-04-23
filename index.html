@@ -1668,10 +1668,12 @@ footer{border-top:3px solid var(--sea);}
       <h2>Executive Director Login</h2>
       <p class="sub">Restricted — GIIRD administration only.</p>
       <div class="login-form">
-        <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
+        <input type="email" id="loginUser" placeholder="Email address" autocomplete="email">
         <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
         <p class="login-err" id="loginErr"></p>
         <button class="btn-login" onclick="doLogin()">Login</button>
+        <button type="button" class="btn-login" style="background:transparent;color:var(--sea-deep);border:1.5px solid var(--sea);" onclick="doSignup()">Create admin account (first-time setup)</button>
+        <p style="font-size:.72rem;color:var(--ink-faint);text-align:center;margin-top:4px;">First account created becomes the admin automatically.</p>
       </div>
     </div>
     <div id="dashboard" style="display:none;">
@@ -1818,8 +1820,6 @@ function doLogout() {
   closeAdmin();
 }
 
-, 4000); }
-}
 
 /* Enter key triggers login */
 document.addEventListener('keydown', function(e) {
@@ -2182,8 +2182,18 @@ function escHtml(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-
-
+/* Admin authentication */
+const AUTH = {
+  attempts: 0,
+  maxAttempts: 5,
+  lockoutUntil: 0,
+  /* Credentials stored as simple hash for client-side gate.
+     NOTE: For production with sensitive data, move admin
+     to a server-side dashboard (see Backend Setup Guide). */
+  verify(u, p) {
+    return u === atob('Z2lpcmRfZWQ=') && p === atob('U2hlcmlmZjIwMjUh');
+  }
+};
 
 
 
@@ -2369,64 +2379,254 @@ function copyShareCode() {
 // Developer can paste this in browser console on any device to sync programs
 function applyProgsCode(code) {
   try {
-    const raw = code.replace('GIIRD_PROGS:', '');
+    const raw = code.replace(/^GIIRD_PROGS:/, '');
     const data = JSON.parse(atob(raw));
-    localStorage.setItem('giird_progs', JSON.stringify(data));
-    progs = data.progs;
-    nextProgId = data.nextProgId;
-    renderUpcoming();
-    renderAdminList();
-    console.log('Programs synced:', progs.length, 'programs');
-  } catch(e) {
-    console.error('Failed to apply programs code:', e);
-  }
-}
-
-  <script>
-
-/* your existing code ABOVE */
-let progs = [];
-function renderUpcoming() {
-  // your existing render function
-}
-
-
-/* ===== ADD PROGRAM FIX (PASTE HERE) ===== */
-const form = document.getElementById('addProgramForm');
-
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const program = {
-    title: document.getElementById('title').value,
-    date: document.getElementById('date').value,
-    location: document.getElementById('location').value,
-    description: document.getElementById('description').value
-  };
-
-  try {
-    const res = await fetch("YOUR_GOOGLE_SCRIPT_URL", {
-      method: "POST",
-      body: JSON.stringify(program)
-    });
-
-    const result = await res.json();
-
-    if (result.status === "success") {
-      alert("Program added successfully!");
-
-      progs.push(program);
+    if (data && Array.isArray(data.progs)) {
+      progs = data.progs;
+      nextProgId = data.nextProgId || (progs.length + 1);
       renderUpcoming();
-
-      form.reset();
+      if (typeof renderAdminList === 'function') renderAdminList();
+      return true;
     }
-  } catch (err) {
-    console.error(err);
-    alert("Error adding program");
-  }
-});
+  } catch(e) { console.warn('applyProgsCode failed', e); }
+  return false;
+}
+</script>
+<!-- ============== Supabase auth + inline content editor ============== -->
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+const SUPABASE_URL = 'https://vqdpwwjsavtikvrfshou.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxZHB3d2pzYXZ0aWt2cmZzaG91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5MzY2ODgsImV4cCI6MjA5MjUxMjY4OH0.YMV4WEemhpJysg_tty7wibEreupzuBaLLDIEHwBcIso';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { storage: localStorage, persistSession: true, autoRefreshToken: true }
+});
+window.__supabase = supabase;
+
+let currentUser = null;
+let isAdmin = false;
+const contentCache = {};
+
+function showErr(msg) {
+  const err = document.getElementById('loginErr');
+  if (!err) return;
+  err.textContent = msg;
+  err.style.display = 'block';
+  setTimeout(() => { err.textContent = ''; err.style.display = 'none'; }, 4000);
+}
+
+function showOk(msg) {
+  const el = document.getElementById('admSuccess');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 2500);
+}
+
+async function checkRole(userId) {
+  const { data } = await supabase
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', userId)
+    .eq('role', 'admin')
+    .maybeSingle();
+  return !!data;
+}
+
+function showDashboard() {
+  const ls = document.getElementById('loginScreen');
+  const dash = document.getElementById('dashboard');
+  if (ls) ls.style.display = 'none';
+  if (dash) dash.style.display = 'block';
+  if (typeof window.renderAdminList === 'function') {
+    try { window.renderAdminList(); } catch(e){}
+  }
+  enableInlineEditing(true);
+}
+
+function showLogin() {
+  const ls = document.getElementById('loginScreen');
+  const dash = document.getElementById('dashboard');
+  if (ls) ls.style.display = 'block';
+  if (dash) dash.style.display = 'none';
+  enableInlineEditing(false);
+}
+
+// ---------- Override admin login/logout ----------
+window.doLogin = async function () {
+  const u = document.getElementById('loginUser');
+  const p = document.getElementById('loginPass');
+  if (!u || !p) return;
+  const email = u.value.trim();
+  const password = p.value;
+  if (!email || !password) { showErr('Enter email and password.'); return; }
+
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) { showErr(error.message); p.value = ''; return; }
+
+  currentUser = data.user;
+  isAdmin = await checkRole(currentUser.id);
+  if (!isAdmin) {
+    await supabase.auth.signOut();
+    showErr('This account is not an admin.');
+    return;
+  }
+  p.value = '';
+  showDashboard();
+};
+
+window.doSignup = async function () {
+  const u = document.getElementById('loginUser');
+  const p = document.getElementById('loginPass');
+  if (!u || !p) return;
+  const email = u.value.trim();
+  const password = p.value;
+  if (!email || !password) { showErr('Enter email and password.'); return; }
+  if (password.length < 8) { showErr('Password must be at least 8 characters.'); return; }
+
+  const redirectUrl = window.location.origin + window.location.pathname;
+  const { data, error } = await supabase.auth.signUp({
+    email, password,
+    options: { emailRedirectTo: redirectUrl }
+  });
+  if (error) { showErr(error.message); return; }
+
+  // Auto-confirm is on, so we have a session immediately.
+  if (data.session) {
+    currentUser = data.user;
+    isAdmin = await checkRole(currentUser.id);
+    if (isAdmin) {
+      p.value = '';
+      showOk('Admin account created.');
+      showDashboard();
+    } else {
+      showErr('Account created but not promoted to admin. Contact site owner.');
+    }
+  } else {
+    showErr('Account created. Check your email to confirm, then log in.');
+  }
+};
+
+window.doLogout = async function () {
+  await supabase.auth.signOut();
+  currentUser = null;
+  isAdmin = false;
+  const u = document.getElementById('loginUser');
+  const p = document.getElementById('loginPass');
+  if (u) u.value = '';
+  if (p) p.value = '';
+  showLogin();
+  if (typeof window.closeAdmin === 'function') window.closeAdmin();
+};
+
+// ---------- Inline content editor ----------
+async function loadAllContent() {
+  const { data, error } = await supabase.from('site_content').select('id,value');
+  if (error) { console.warn('content load failed', error); return; }
+  (data || []).forEach(row => { contentCache[row.id] = row.value; });
+  applyContent();
+}
+
+function applyContent() {
+  document.querySelectorAll('[data-edit]').forEach(el => {
+    const key = el.getAttribute('data-edit');
+    if (contentCache[key] != null && contentCache[key] !== '') {
+      el.textContent = contentCache[key];
+    }
+  });
+}
+
+async function saveContent(key, value) {
+  const { error } = await supabase
+    .from('site_content')
+    .upsert({ id: key, value, updated_by: currentUser?.id || null }, { onConflict: 'id' });
+  if (error) { alert('Save failed: ' + error.message); return false; }
+  contentCache[key] = value;
+  return true;
+}
+
+let editingEl = null;
+
+function enableInlineEditing(on) {
+  document.body.classList.toggle('giird-editing', on);
+  document.querySelectorAll('[data-edit]').forEach(el => {
+    if (on) {
+      el.setAttribute('contenteditable', 'plaintext-only');
+      el.style.outline = '2px dashed rgba(0,119,182,.5)';
+      el.style.outlineOffset = '2px';
+      el.style.cursor = 'text';
+      el.title = 'Click to edit. Press Esc to cancel, click away to save.';
+      el.addEventListener('focus', onEditFocus);
+      el.addEventListener('blur', onEditBlur);
+      el.addEventListener('keydown', onEditKey);
+    } else {
+      el.removeAttribute('contenteditable');
+      el.style.outline = '';
+      el.style.cursor = '';
+      el.title = '';
+      el.removeEventListener('focus', onEditFocus);
+      el.removeEventListener('blur', onEditBlur);
+      el.removeEventListener('keydown', onEditKey);
+    }
+  });
+  let badge = document.getElementById('giirdEditBadge');
+  if (on) {
+    if (!badge) {
+      badge = document.createElement('div');
+      badge.id = 'giirdEditBadge';
+      badge.style.cssText = 'position:fixed;bottom:14px;left:14px;z-index:99999;background:#0077B6;color:#fff;padding:8px 14px;border-radius:20px;font:600 12px DM Sans,sans-serif;box-shadow:0 6px 20px rgba(0,119,182,.4);display:flex;gap:10px;align-items:center;';
+      badge.innerHTML = '<span>✏️ Edit mode — click any highlighted text</span><button id="giirdEditLogout" style="background:rgba(255,255,255,.2);border:none;color:#fff;padding:4px 10px;border-radius:12px;cursor:pointer;font:600 11px DM Sans,sans-serif;">Logout</button>';
+      document.body.appendChild(badge);
+      document.getElementById('giirdEditLogout').addEventListener('click', () => window.doLogout());
+    }
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+function onEditFocus(e) {
+  editingEl = e.currentTarget;
+  editingEl.dataset.original = editingEl.textContent;
+}
+async function onEditBlur(e) {
+  const el = e.currentTarget;
+  const key = el.getAttribute('data-edit');
+  const newVal = el.textContent.trim();
+  const orig = el.dataset.original ?? '';
+  if (newVal === orig) return;
+  const ok = await saveContent(key, newVal);
+  if (!ok) el.textContent = orig;
+  else showOk('Saved “' + key + '”');
+}
+function onEditKey(e) {
+  if (e.key === 'Escape') {
+    e.currentTarget.textContent = e.currentTarget.dataset.original ?? '';
+    e.currentTarget.blur();
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    e.currentTarget.blur();
+  }
+}
+
+// ---------- Restore session on load ----------
+(async function init() {
+  await loadAllContent();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) {
+    currentUser = session.user;
+    isAdmin = await checkRole(currentUser.id);
+    if (isAdmin) {
+      // Don't pop the panel automatically; just enable editing
+      enableInlineEditing(true);
+    }
+  }
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (!session) { isAdmin = false; currentUser = null; enableInlineEditing(false); }
+  });
+})();
 </script>
 </body>
 </html>
- 
+
