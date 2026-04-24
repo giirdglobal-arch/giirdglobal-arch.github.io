@@ -1739,22 +1739,27 @@ footer{border-top:3px solid var(--sea);}
       </div>
     </div>
 
-    <!-- Reset password with email code (no links, no redirects) -->
+    <!-- Reset password — simple email link flow -->
     <div id="resetScreen" style="display:none;">
       <h2>Reset your password</h2>
-      <p class="sub" id="resetSubtitle">We will email you a 6-digit code. Enter it below with your new password.</p>
+      <p class="sub" id="resetSubtitle">Enter your email and we'll send you a secure link to reset your password.</p>
       <div class="login-form">
         <input type="email" id="resetEmail" placeholder="Your email address" autocomplete="email">
-        <button class="btn-login" id="sendCodeBtn" onclick="doSendResetCode()">Email me a 6-digit code</button>
-
-        <div id="resetCodeBlock" style="display:none;margin-top:8px;">
-          <input type="text" id="resetCode" placeholder="6-digit code from email" inputmode="numeric" autocomplete="one-time-code" maxlength="6" style="letter-spacing:4px;text-align:center;font-size:1.1rem;">
-          <input type="password" id="newPwd1" placeholder="New password (min 8 characters)" autocomplete="new-password">
-          <input type="password" id="newPwd2" placeholder="Repeat new password" autocomplete="new-password">
-          <button class="btn-login" onclick="doVerifyCodeAndSetPassword()">Set new password</button>
-        </div>
-
+        <button class="btn-login" id="sendLinkBtn" onclick="doSendResetLink()">Send reset link</button>
         <p class="login-err" id="resetErr"></p>
+        <button type="button" class="btn-login" style="background:transparent;color:var(--sea-deep);border:1.5px solid var(--sea);margin-top:6px;" onclick="cancelReset()">Back to login</button>
+      </div>
+    </div>
+
+    <!-- Set new password (shown after user clicks the email link and lands back here) -->
+    <div id="newPasswordScreen" style="display:none;">
+      <h2>Set a new password</h2>
+      <p class="sub">Choose a new password for your admin account.</p>
+      <div class="login-form">
+        <input type="password" id="newPwd1" placeholder="New password (min 8 characters)" autocomplete="new-password">
+        <input type="password" id="newPwd2" placeholder="Repeat new password" autocomplete="new-password">
+        <button class="btn-login" onclick="doSetNewPassword()">Update password</button>
+        <p class="login-err" id="newPwdErr"></p>
         <button type="button" class="btn-login" style="background:transparent;color:var(--sea-deep);border:1.5px solid var(--sea);margin-top:6px;" onclick="cancelReset()">Back to login</button>
       </div>
     </div>
@@ -2684,15 +2689,17 @@ window.doSignup = async function () {
   }
 };
 
-// ---------- Email-code (OTP) password reset — no links, no redirects ----------
+// ---------- Simple email-link password reset ----------
 window.openResetPanel = function (ev) {
   if (ev) ev.preventDefault();
   if (typeof window.openAdmin === 'function') window.openAdmin();
   const login = document.getElementById('loginScreen');
   const dash  = document.getElementById('dashboard');
   const reset = document.getElementById('resetScreen');
+  const newPw = document.getElementById('newPasswordScreen');
   if (login) login.style.display = 'none';
   if (dash)  dash.style.display  = 'none';
+  if (newPw) newPw.style.display = 'none';
   if (reset) reset.style.display = 'block';
 
   // Pre-fill email from the login form if present
@@ -2700,9 +2707,6 @@ window.openResetPanel = function (ev) {
   const re = document.getElementById('resetEmail');
   if (lu && re && lu.value) re.value = lu.value.trim();
 
-  // Reset UI state
-  const codeBlock = document.getElementById('resetCodeBlock');
-  if (codeBlock) codeBlock.style.display = 'none';
   showResetErr('');
   setTimeout(() => { const f = document.getElementById('resetEmail'); if (f && !f.value) f.focus(); }, 50);
 };
@@ -2714,75 +2718,96 @@ function showResetErr(msg) {
   el.style.color = (msg && msg.startsWith('✓')) ? 'var(--sea-deep)' : '';
 }
 
+function showNewPwdErr(msg) {
+  const el = document.getElementById('newPwdErr');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = (msg && msg.startsWith('✓')) ? 'var(--sea-deep)' : '';
+}
+
 window.cancelReset = function () {
   const reset = document.getElementById('resetScreen');
+  const newPw = document.getElementById('newPasswordScreen');
   if (reset) reset.style.display = 'none';
+  if (newPw) newPw.style.display = 'none';
   showLogin();
   if (window.location.hash) history.replaceState(null, '', window.location.pathname);
 };
 
-// Step 1: send a 6-digit code to the user's email.
-// Using signInWithOtp with shouldCreateUser:false sends a numeric OTP that we
-// can later verify with type:'recovery' to update the password.
-window.doSendResetCode = async function () {
+// Step 1: send a password reset link to the user's email.
+window.doSendResetLink = async function () {
   const e = document.getElementById('resetEmail');
   const email = (e && e.value || '').trim().toLowerCase();
   if (!email) { showResetErr('Enter your email address.'); return; }
 
-  const btn = document.getElementById('sendCodeBtn');
+  const btn = document.getElementById('sendLinkBtn');
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
 
-  // resetPasswordForEmail with no redirectTo will email a 6-digit OTP code
-  // (Supabase falls back to OTP when no redirect URL is provided).
-  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  // Send a reset link that brings the user back to this page in recovery mode.
+  const redirectUrl = window.location.origin + window.location.pathname;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: redirectUrl
+  });
 
-  if (btn) { btn.disabled = false; btn.textContent = 'Resend code'; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Resend link'; }
 
   if (error) { showResetErr(error.message); return; }
 
-  const codeBlock = document.getElementById('resetCodeBlock');
-  if (codeBlock) codeBlock.style.display = 'block';
-  showResetErr('✓ Code sent. Check your email (and spam folder) for a 6-digit code.');
-  setTimeout(() => { const c = document.getElementById('resetCode'); if (c) c.focus(); }, 50);
+  showResetErr('✓ Reset link sent. Check your email (and spam folder) and click the link to set a new password.');
 };
 
-// Step 2: verify the code and set the new password.
-window.doVerifyCodeAndSetPassword = async function () {
-  const e  = document.getElementById('resetEmail');
-  const c  = document.getElementById('resetCode');
-  const a  = document.getElementById('newPwd1');
-  const b  = document.getElementById('newPwd2');
-  const email = (e && e.value || '').trim().toLowerCase();
-  const code  = (c && c.value || '').trim();
+// Step 2: when the user clicks the link in the email, Supabase fires a
+// PASSWORD_RECOVERY event. We then show the "set new password" panel.
+function showNewPasswordPanel() {
+  if (typeof window.openAdmin === 'function') window.openAdmin();
+  const login = document.getElementById('loginScreen');
+  const dash  = document.getElementById('dashboard');
+  const reset = document.getElementById('resetScreen');
+  const newPw = document.getElementById('newPasswordScreen');
+  if (login) login.style.display = 'none';
+  if (dash)  dash.style.display  = 'none';
+  if (reset) reset.style.display = 'none';
+  if (newPw) newPw.style.display = 'block';
+  showNewPwdErr('');
+  setTimeout(() => { const f = document.getElementById('newPwd1'); if (f) f.focus(); }, 50);
+}
+
+window.doSetNewPassword = async function () {
+  const a = document.getElementById('newPwd1');
+  const b = document.getElementById('newPwd2');
   const p1 = (a && a.value) || '';
   const p2 = (b && b.value) || '';
 
-  if (!email)            { showResetErr('Enter your email address.'); return; }
-  if (!/^\d{6}$/.test(code)) { showResetErr('Enter the 6-digit code from your email.'); return; }
-  if (p1.length < 8)     { showResetErr('Password must be at least 8 characters.'); return; }
-  if (p1 !== p2)         { showResetErr('Passwords do not match.'); return; }
+  if (p1.length < 8) { showNewPwdErr('Password must be at least 8 characters.'); return; }
+  if (p1 !== p2)     { showNewPwdErr('Passwords do not match.'); return; }
 
-  // Verify the recovery OTP — this signs the user in temporarily so we can update the password.
-  const { error: verifyErr } = await supabase.auth.verifyOtp({ email, token: code, type: 'recovery' });
-  if (verifyErr) { showResetErr('Invalid or expired code. ' + verifyErr.message); return; }
+  const { error } = await supabase.auth.updateUser({ password: p1 });
+  if (error) { showNewPwdErr(error.message); return; }
 
-  const { error: updErr } = await supabase.auth.updateUser({ password: p1 });
-  if (updErr) { showResetErr(updErr.message); return; }
+  showNewPwdErr('✓ Password updated. Please sign in with your new password.');
+  if (a) a.value = ''; if (b) b.value = '';
 
-  showResetErr('✓ Password updated. Logging you out — please sign in with your new password.');
-  if (a) a.value = ''; if (b) b.value = ''; if (c) c.value = '';
   await supabase.auth.signOut();
+  if (window.location.hash) history.replaceState(null, '', window.location.pathname);
+
   setTimeout(() => {
-    const reset = document.getElementById('resetScreen');
-    if (reset) reset.style.display = 'none';
+    const newPw = document.getElementById('newPasswordScreen');
+    if (newPw) newPw.style.display = 'none';
     showLogin();
-    // Pre-fill the email so the user can log in immediately
     const lu = document.getElementById('loginUser');
-    if (lu) lu.value = email;
     const lp = document.getElementById('loginPass');
     if (lp) { lp.value = ''; lp.focus(); }
   }, 1500);
 };
+
+// Listen for the recovery event triggered when the user clicks the email link.
+if (typeof supabase !== 'undefined' && supabase.auth && supabase.auth.onAuthStateChange) {
+  supabase.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      showNewPasswordPanel();
+    }
+  });
+}
 
 async function loadAllContent() {
   const { data, error } = await supabase.from('site_content').select('id,value');
