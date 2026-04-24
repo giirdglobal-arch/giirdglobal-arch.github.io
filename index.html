@@ -1909,9 +1909,9 @@ document.addEventListener('click', function(e) {
    Update these endpoints when switching accounts.
    ═══════════════════════════════════════════════════════════════════
 
-   VOLUNTEER_EP   → Formspree endpoint for volunteer form emails
-   CONTACT_EP     → Formspree endpoint for contact form emails
-   SHEETS_URL     → Google Apps Script web app URL (logs ALL submissions)
+   VOLUNTEER_EP   → (LEGACY, unused) — volunteer now goes to Lovable Cloud
+   CONTACT_EP     → Formspree endpoint for contact form emails (still active)
+   SHEETS_URL     → (LEGACY, unused) — replaced by LOVABLE_FN_BASE below
 
    To switch Formspree to giirdglobal@gmail.com:
    1. Go to https://formspree.io → sign in with giirdglobal@gmail.com
@@ -1927,6 +1927,30 @@ const CONTACT_EP   = 'https://formspree.io/f/mvzvqqbz';
    GIIRD Submissions Google Sheet under giirdglobal@gmail.com */
 const SHEETS_URL   = 'https://tneyurfzjubonfpeuoii.supabase.co/functions/v1/submit-form';
 const SHEETS_AUTH  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuZXl1cmZ6anVib25mcGV1b2lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5ODIyMTcsImV4cCI6MjA5MjU1ODIxN30.KjT-6oXDjIt3ZIGkWhne1B4WDshPsLADLP5eyk-qLKY';
+
+/* ── Lovable Cloud (giirdglobal@gmail.com) — new GIIRD Submissions sheet ── */
+const LOVABLE_FN_BASE   = 'https://jpgjmaiivnlvopgwbomq.supabase.co/functions/v1';
+const LOVABLE_VOLUNTEER = LOVABLE_FN_BASE + '/submit-volunteer';
+const LOVABLE_DONATION  = LOVABLE_FN_BASE + '/submit-donation';
+
+async function postLovable(url, body) {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      console.warn('Lovable endpoint returned', res.status, txt);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn('Lovable endpoint unavailable', e);
+    return false;
+  }
+}
 
 /* ── JSONBin — live program storage (one-time setup, always in sync) ── */
 /* API config — encoded */
@@ -1994,32 +2018,11 @@ async function sendDual(formspreeUrl, sheetName, fields) {
     }
   };
 
-  // Send to Formspree (email delivery) — skipped when no URL provided
-  if (formspreeUrl) {
-    try {
-      const res = await fetch(formspreeUrl, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-        body: JSON.stringify(fields)
-      });
-      result.formspree = res.ok;
-    } catch(e) { console.warn('Formspree unavailable'); }
-  }
+  // Formspree disabled — using Lovable Cloud only
+  result.formspree = false;
 
-  // Send to Lovable Cloud edge function → Google Sheets
-  try {
-    const res = await fetch(SHEETS_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SHEETS_AUTH,
-        'Authorization': 'Bearer ' + SHEETS_AUTH
-      },
-      body: JSON.stringify(payload.fields)
-    });
-    result.sheets = res.ok;
-    if (!res.ok) console.warn('Sheets edge function returned', res.status);
-  } catch(e) { console.warn('Sheets unavailable', e); }
+  // Legacy Apps Script disabled — Volunteer & Donation now use Lovable Cloud directly
+  // (See submitVolunteer / submitDonation for the active backend calls)
 
   return result;
 }
@@ -2080,6 +2083,16 @@ async function submitVolunteer() {
     form_type: 'Volunteer Application'
   });
 
+  // Also send to new Lovable Cloud backend (GIIRD Submissions sheet + admin dashboard)
+  const lovableOk = await postLovable(LOVABLE_VOLUNTEER, {
+    full_name: name,
+    email,
+    phone: phone || null,
+    area_of_interest: role || null,
+    message: message || null,
+  });
+  result.sheets = result.sheets || lovableOk;
+
   setBtn(btn, 'Submit Application', false);
 
   if (result.formspree || result.sheets) {
@@ -2127,14 +2140,21 @@ async function submitContact() {
   const btn = document.querySelector('.btn-send');
   setBtn(btn, 'Sending...', true);
 
-  const result = await sendDual(CONTACT_EP, 'Contact Form', {
-    name: `${firstName} ${lastName}`.trim(),
-    email,
-    organisation,
-    subject,
-    message,
-    form_type: 'Contact Message'
-  });
+  // Send Contact form via Formspree directly (Volunteer/Donate use Lovable Cloud)
+  let contactOk = false;
+  try {
+    const r = await fetch(CONTACT_EP, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      body: JSON.stringify({
+        name: `${firstName} ${lastName}`.trim(),
+        email, organisation, subject, message,
+        form_type: 'Contact Message'
+      })
+    });
+    contactOk = r.ok;
+  } catch(e) { console.warn('Contact send failed', e); }
+  const result = { formspree: contactOk, sheets: false };
 
   btn.innerHTML = 'Send Message';
   btn.disabled = false;
@@ -2193,6 +2213,18 @@ async function submitDonation() {
     amount, currency, method, message,
     form_type: 'Donation Pledge'
   });
+
+  // Also send to new Lovable Cloud backend (GIIRD Submissions sheet + admin dashboard)
+  const lovableOk = await postLovable(LOVABLE_DONATION, {
+    donor_name: name,
+    email,
+    phone: phone || null,
+    amount: amt,
+    currency: currency || 'USD',
+    payment_method: method || null,
+    message: message || null,
+  });
+  result.sheets = result.sheets || lovableOk;
 
   setBtn(btn, 'Submit Pledge', false);
 
