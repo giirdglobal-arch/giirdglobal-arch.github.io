@@ -1875,8 +1875,8 @@ function doLogin() {
   var u = document.getElementById('loginUser');
   var p = document.getElementById('loginPass');
   if (!u || !p) return;
-  var _u = atob('Z2lpcmRfZWQ=');
-  var _p = atob('U2hlcmlmZjIwMjUh');
+  var _u = atob('Z2lpcmRnbG9iYWxAZ21haWwuY29t');
+  var _p = atob('U2hlcmlmZkAxMjM=');
   if (u.value.trim() === _u && p.value.trim() === _p) {
     var ls = document.getElementById('loginScreen');
     var dash = document.getElementById('dashboard');
@@ -1901,8 +1901,8 @@ function doLogout() {
   if (dash) dash.style.display = 'none';
   var u = document.getElementById('loginUser');
   var p = document.getElementById('loginPass');
-  if (u) u.value = '';
-  if (p) p.value = '';
+  if (u) u.value = 'giirdglobal@gmail.com';
+  if (p) p.value = 'Sheriff@123';
   sessionStorage.removeItem('giird_auth');
   closeAdmin();
 }
@@ -2796,7 +2796,9 @@ window.doSetNewPassword = async function () {
     showLogin();
     const lu = document.getElementById('loginUser');
     const lp = document.getElementById('loginPass');
-    if (lp) { lp.value = ''; lp.focus(); }
+    if (lp) { lp.value = 'Sheriff@123'; lp.focus(); }
+    const lu = document.getElementById('loginUser');
+    if (lu) lu.value = 'giirdglobal@gmail.com';
   }, 1500);
 };
 
