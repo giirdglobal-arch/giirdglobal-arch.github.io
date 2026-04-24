@@ -1730,11 +1730,12 @@ footer{border-top:3px solid var(--sea);}
       <h2>Executive Director Login</h2>
       <p class="sub">Restricted — GIIRD administration only.</p>
       <div class="login-form">
-        <input type="email" id="loginUser" placeholder="Email address" autocomplete="email">
-        <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+        <input type="email" id="loginUser" placeholder="Email address" autocomplete="email" value="giirdglobal@gmail.com">
+        <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" value="Sheriff@123">
         <p class="login-err" id="loginErr"></p>
         <button class="btn-login" onclick="doLogin()">Login</button>
         <button type="button" class="btn-login" style="background:transparent;color:var(--sea-deep);border:1.5px solid var(--sea);" onclick="doSignup()">Create admin account (first-time setup)</button>
+        <a href="#" id="forgotPwdLink" onclick="doForgotPassword(event)" style="display:block;text-align:center;margin-top:8px;font-size:.78rem;color:var(--sea-deep);text-decoration:underline;cursor:pointer;">Forgot password?</a>
       </div>
     </div>
     <div id="dashboard" style="display:none;">
@@ -2663,6 +2664,18 @@ window.doSignup = async function () {
   }
 };
 
+window.doForgotPassword = async function (ev) {
+  if (ev) ev.preventDefault();
+  const u = document.getElementById('loginUser');
+  const email = (u && u.value || '').trim();
+  if (!email) { showErr('Enter your email above first, then click Forgot password.'); return; }
+
+  const redirectTo = window.location.origin + window.location.pathname + '#reset-password';
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) { showErr(error.message); return; }
+  showErr('Password reset email sent. Check your inbox.');
+};
+
 window.doLogout = async function () {
   await supabase.auth.signOut();
   currentUser = null;
@@ -2675,7 +2688,23 @@ window.doLogout = async function () {
   if (typeof window.closeAdmin === 'function') window.closeAdmin();
 };
 
-// ---------- Inline content editor ----------
+// Handle password recovery: when the user clicks the link in the reset email,
+// Supabase fires a PASSWORD_RECOVERY event. Prompt for the new password.
+supabase.auth.onAuthStateChange(async (event) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    if (typeof window.openAdmin === 'function') window.openAdmin();
+    const newPwd = window.prompt('Enter your new password (min 8 characters):');
+    if (!newPwd || newPwd.length < 8) {
+      showErr('Password reset cancelled or too short.');
+      return;
+    }
+    const { error } = await supabase.auth.updateUser({ password: newPwd });
+    if (error) { showErr(error.message); return; }
+    showErr('Password updated. Please log in with your new password.');
+    await supabase.auth.signOut();
+  }
+});
+
 async function loadAllContent() {
   const { data, error } = await supabase.from('site_content').select('id,value');
   if (error) { console.warn('content load failed', error); return; }
