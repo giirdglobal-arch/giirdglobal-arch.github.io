@@ -1735,7 +1735,20 @@ footer{border-top:3px solid var(--sea);}
         <p class="login-err" id="loginErr"></p>
         <button class="btn-login" onclick="doLogin()">Login</button>
         <button type="button" class="btn-login" style="background:transparent;color:var(--sea-deep);border:1.5px solid var(--sea);" onclick="doSignup()">Create admin account (first-time setup)</button>
-        <a href="#" id="forgotPwdLink" onclick="doForgotPassword(event)" style="display:block;text-align:center;margin-top:8px;font-size:.78rem;color:var(--sea-deep);text-decoration:underline;cursor:pointer;">Forgot password?</a>
+        <a href="#" id="forgotPwdLink" onclick="doForgotPassword(event)" style="display:block;text-align:center;margin-top:10px;font-size:.85rem;color:var(--sea-deep);text-decoration:underline;cursor:pointer;">Forgot password?</a>
+      </div>
+    </div>
+
+    <!-- Set new password panel (shown after clicking the email reset link) -->
+    <div id="resetScreen" style="display:none;">
+      <h2>Set a new password</h2>
+      <p class="sub">You clicked the reset link from your email. Enter a new password below.</p>
+      <div class="login-form">
+        <input type="password" id="newPwd1" placeholder="New password (min 8 characters)" autocomplete="new-password">
+        <input type="password" id="newPwd2" placeholder="Repeat new password" autocomplete="new-password">
+        <p class="login-err" id="resetErr"></p>
+        <button class="btn-login" onclick="doSetNewPassword()">Save new password</button>
+        <button type="button" class="btn-login" style="background:transparent;color:var(--sea-deep);border:1.5px solid var(--sea);" onclick="cancelReset()">Cancel</button>
       </div>
     </div>
     <div id="dashboard" style="display:none;">
@@ -2670,10 +2683,10 @@ window.doForgotPassword = async function (ev) {
   const email = (u && u.value || '').trim();
   if (!email) { showErr('Enter your email above first, then click Forgot password.'); return; }
 
-  const redirectTo = window.location.origin + window.location.pathname + '#reset-password';
+  const redirectTo = window.location.origin + window.location.pathname + '#type=recovery';
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) { showErr(error.message); return; }
-  showErr('Password reset email sent. Check your inbox.');
+  showErr('✓ Password reset email sent. Open it on this same device, click the link, then set a new password here.');
 };
 
 window.doLogout = async function () {
@@ -2688,20 +2701,73 @@ window.doLogout = async function () {
   if (typeof window.closeAdmin === 'function') window.closeAdmin();
 };
 
-// Handle password recovery: when the user clicks the link in the reset email,
-// Supabase fires a PASSWORD_RECOVERY event. Prompt for the new password.
+// ---------- Inline password-reset UX (no window.prompt) ----------
+function showResetPanel() {
+  if (typeof window.openAdmin === 'function') window.openAdmin();
+  const login = document.getElementById('loginScreen');
+  const dash  = document.getElementById('dashboard');
+  const reset = document.getElementById('resetScreen');
+  if (login) login.style.display = 'none';
+  if (dash)  dash.style.display  = 'none';
+  if (reset) reset.style.display = 'block';
+  const errEl = document.getElementById('resetErr');
+  if (errEl) errEl.textContent = '';
+  setTimeout(() => { const f = document.getElementById('newPwd1'); if (f) f.focus(); }, 50);
+}
+
+function showResetErr(msg) {
+  const el = document.getElementById('resetErr');
+  if (el) { el.textContent = msg; el.style.color = msg.startsWith('✓') ? 'var(--sea-deep)' : ''; }
+}
+
+window.cancelReset = function () {
+  const reset = document.getElementById('resetScreen');
+  if (reset) reset.style.display = 'none';
+  showLogin();
+  // Clear the recovery hash so refresh doesn't re-open the panel
+  if (window.location.hash) history.replaceState(null, '', window.location.pathname);
+};
+
+window.doSetNewPassword = async function () {
+  const a = document.getElementById('newPwd1');
+  const b = document.getElementById('newPwd2');
+  const p1 = (a && a.value) || '';
+  const p2 = (b && b.value) || '';
+  if (p1.length < 8) { showResetErr('Password must be at least 8 characters.'); return; }
+  if (p1 !== p2)     { showResetErr('Passwords do not match.'); return; }
+
+  const { error } = await supabase.auth.updateUser({ password: p1 });
+  if (error) { showResetErr(error.message); return; }
+
+  showResetErr('✓ Password updated. You can now log in with your new password.');
+  if (a) a.value = ''; if (b) b.value = '';
+  await supabase.auth.signOut();
+  // Clear hash and return to login after a short pause
+  if (window.location.hash) history.replaceState(null, '', window.location.pathname);
+  setTimeout(() => {
+    const reset = document.getElementById('resetScreen');
+    if (reset) reset.style.display = 'none';
+    showLogin();
+  }, 1500);
+};
+
+// Detect a password-recovery deep link in the URL hash on page load.
+function checkForRecoveryHash() {
+  const h = window.location.hash || '';
+  if (h.includes('type=recovery') || h.includes('access_token')) {
+    showResetPanel();
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', checkForRecoveryHash);
+} else {
+  checkForRecoveryHash();
+}
+
+// Supabase fires a PASSWORD_RECOVERY event when the user lands from the email link.
 supabase.auth.onAuthStateChange(async (event) => {
   if (event === 'PASSWORD_RECOVERY') {
-    if (typeof window.openAdmin === 'function') window.openAdmin();
-    const newPwd = window.prompt('Enter your new password (min 8 characters):');
-    if (!newPwd || newPwd.length < 8) {
-      showErr('Password reset cancelled or too short.');
-      return;
-    }
-    const { error } = await supabase.auth.updateUser({ password: newPwd });
-    if (error) { showErr(error.message); return; }
-    showErr('Password updated. Please log in with your new password.');
-    await supabase.auth.signOut();
+    showResetPanel();
   }
 });
 
